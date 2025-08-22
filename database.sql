@@ -36,19 +36,144 @@ CREATE TABLE user_address (
   FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
 
-CREATE TABLE payment_method (
-  payment_id SERIAL PRIMARY KEY,
+-- Payment Methods Table
+-- Stores all saved payment methods for users including cards, UPI, and COD preferences
+-- This table maintains both JUSPAY and COD payment method details
+CREATE TABLE payment_methods (
+  payment_method_id SERIAL PRIMARY KEY,
   user_id INT NOT NULL,
-  type VARCHAR(50) NOT NULL,
+  payment_type VARCHAR(50) NOT NULL
+    CHECK (payment_type IN ('CREDIT_CARD', 'DEBIT_CARD', 'UPI', 'NETBANKING', 'WALLET', 'COD')),
   is_default BOOLEAN DEFAULT FALSE,
-  payment_gateway VARCHAR(50) NOT NULL,
-  gateway_payment_id VARCHAR(100),
-  cardholder_name VARCHAR(100) NOT NULL,
-  card_last_four VARCHAR(4),
-  card_type VARCHAR(50) NOT NULL,
+  payment_provider VARCHAR(50) NOT NULL
+    CHECK (payment_provider IN ('JUSPAY', 'COD')),
+  
+  -- JUSPAY Integration Fields
+  -- These fields are used to store JUSPAY-specific information for payment processing
+  juspay_customer_id VARCHAR(100),      -- Unique customer ID from JUSPAY
+  juspay_payment_token VARCHAR(255),    -- Secure token for payment processing
+  payment_instrument VARCHAR(50),        -- Specific instrument type (e.g., VISA, MASTERCARD, GPAY, PHONEPE)
+  
+  -- Card Details (for saved cards via JUSPAY)
+  -- These fields store tokenized card information for repeat transactions
+  card_last_digits VARCHAR(4),          -- Last 4 digits of the card (for display purposes)
+  card_network VARCHAR(50),             -- Network (VISA, MASTERCARD, AMEX, etc.)
+  card_brand VARCHAR(50),               -- Credit/Debit classification
+  card_issuing_bank VARCHAR(100),       -- Name of the issuing bank
+  card_expiry_month VARCHAR(2),         -- MM format
+  card_expiry_year VARCHAR(4),          -- YYYY format
+  card_token_reference VARCHAR(255),    -- JUSPAY's token reference for the card
+  
+  -- UPI Payment Details
+  -- Fields specific to UPI payment methods
+  upi_handle VARCHAR(100),              -- User's UPI ID (e.g., user@okaxis)
+  upi_app_token VARCHAR(255),           -- Token for specific UPI apps
+  
+  -- Status and Audit Fields
+  is_active BOOLEAN DEFAULT TRUE,       -- Whether this payment method is currently usable
+  last_used_at TIMESTAMP,              -- When this payment method was last used
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
+
+-- Sample payment methods data
+INSERT INTO payment_methods (user_id, payment_type, is_default, payment_provider, juspay_customer_id, payment_instrument, card_last_digits, card_network, card_brand, card_issuing_bank, card_expiry_month, card_expiry_year) 
+VALUES 
+  (1, 'CREDIT_CARD', true, 'JUSPAY', 'CUST_001', 'VISA', '4242', 'VISA', 'PREMIUM', 'HDFC Bank', '12', '2025'),
+  (1, 'UPI', false, 'JUSPAY', 'CUST_001', 'GOOGLEPAY', NULL, NULL, NULL, NULL, NULL, NULL),
+  (2, 'DEBIT_CARD', true, 'JUSPAY', 'CUST_002', 'MASTERCARD', '8299', 'MASTERCARD', 'PLATINUM', 'ICICI Bank', '08', '2024'),
+  (3, 'COD', true, 'COD', NULL, 'CASH', NULL, NULL, NULL, NULL, NULL, NULL);
+
+-- Payment Transactions Table
+-- Records all payment transactions including both JUSPAY online payments and COD
+-- Maintains complete transaction history with status tracking and refund information
+CREATE TABLE payment_transactions (
+  transaction_id SERIAL PRIMARY KEY,
+  order_id INT NOT NULL,
+  payment_method_id INT,              -- NULL for guest checkout or one-time payments
+  amount DECIMAL(10, 2) NOT NULL CHECK (amount >= 0),
+  currency VARCHAR(3) DEFAULT 'INR',   -- ISO 4217 currency code
+  
+  -- Transaction Status and Type
+  transaction_status VARCHAR(50) NOT NULL
+    CHECK (transaction_status IN ('INITIATED', 'PENDING', 'AUTHORIZED', 'CAPTURED', 'FAILED', 'REFUNDED', 'CANCELLED')),
+  
+  -- JUSPAY Integration Details
+  juspay_order_reference VARCHAR(100),    -- JUSPAY's unique order reference
+  juspay_payment_reference VARCHAR(100),   -- JUSPAY's payment reference ID
+  juspay_signature VARCHAR(255),          -- Security signature from JUSPAY
+  payment_instrument VARCHAR(50),          -- Specific payment instrument used
+  payment_flow VARCHAR(50),               -- NET/EMI/RECURRING etc.
+  
+  -- Gateway Response Information
+  response_code VARCHAR(10),              -- Payment gateway response code
+  response_message TEXT,                  -- Detailed response message
+  gateway_transaction_id VARCHAR(100),    -- Gateway's transaction reference
+  
+  -- Refund Management
+  refund_status VARCHAR(50)
+    CHECK (refund_status IN ('NOT_APPLICABLE', 'INITIATED', 'PROCESSING', 'COMPLETED', 'FAILED')),
+  refund_reference VARCHAR(100),          -- Unique refund reference
+  refund_amount DECIMAL(10, 2),           -- Amount to be refunded
+  refund_reason TEXT,                     -- Reason for refund
+  refund_initiated_at TIMESTAMP,          -- When refund was initiated
+  refund_completed_at TIMESTAMP,          -- When refund was completed
+  
+  -- Cash on Delivery (COD) Specific Details
+  cod_collection_date TIMESTAMP,          -- When COD payment was collected
+  cod_collector_name VARCHAR(100),        -- Name of person who collected payment
+  cod_reference VARCHAR(100),             -- Reference number for COD collection
+  
+  -- Audit and Tracking Fields
+  ip_address VARCHAR(45),                 -- IP address of transaction
+  user_agent TEXT,                        -- Browser/App info
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE RESTRICT,
+  FOREIGN KEY (payment_method_id) REFERENCES payment_methods(payment_method_id) ON DELETE SET NULL
+);
+
+-- Sample payment transactions data
+INSERT INTO payment_transactions (
+  order_id, payment_method_id, amount, transaction_status, 
+  juspay_order_reference, juspay_payment_reference, payment_instrument, 
+  response_code, response_message, gateway_transaction_id
+) VALUES 
+  (1, 1, 1499.99, 'CAPTURED', 'ORDER_001', 'PAY_001', 'CREDIT_CARD', 'SUCCESS', 'Transaction successful', 'GTW_001'),
+  (2, 2, 999.50, 'CAPTURED', 'ORDER_002', 'PAY_002', 'UPI', 'SUCCESS', 'UPI transaction completed', 'GTW_002'),
+  (3, 3, 2499.00, 'PENDING', 'ORDER_003', 'PAY_003', 'DEBIT_CARD', 'PENDING', 'Authorization in progress', 'GTW_003'),
+  (4, 4, 1299.00, 'INITIATED', NULL, NULL, 'COD', NULL, 'COD payment initiated', NULL);
+
+-- Add triggers for updated_at
+CREATE TRIGGER update_payment_method_updated_at 
+BEFORE UPDATE ON payment_method 
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_payment_transaction_updated_at 
+BEFORE UPDATE ON payment_transaction 
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Payment Related Indexes for Optimized Performance
+
+-- Payment Methods Indexes
+CREATE INDEX idx_payment_methods_user ON payment_methods(user_id);
+CREATE INDEX idx_payment_methods_user_active ON payment_methods(user_id, is_active);
+CREATE INDEX idx_payment_methods_juspay_customer ON payment_methods(juspay_customer_id);
+CREATE INDEX idx_payment_methods_type ON payment_methods(payment_type);
+
+-- Payment Transactions Indexes
+CREATE INDEX idx_payment_transactions_order ON payment_transactions(order_id);
+CREATE INDEX idx_payment_transactions_status ON payment_transactions(transaction_status);
+CREATE INDEX idx_payment_transactions_created ON payment_transactions(created_at);
+CREATE INDEX idx_payment_transactions_juspay ON payment_transactions(juspay_order_reference, juspay_payment_reference);
+CREATE INDEX idx_payment_transactions_refund ON payment_transactions(refund_status);
+
+-- Order Payments Indexes
+CREATE INDEX idx_order_payments_order ON order_payments(order_id);
+CREATE INDEX idx_order_payments_transaction ON order_payments(transaction_id);
+CREATE INDEX idx_order_payments_method ON order_payments(payment_method_id);
+CREATE INDEX idx_order_payments_date ON order_payments(payment_date);
 
 -- Products and collections tables
 CREATE TABLE collection (
@@ -168,17 +293,34 @@ CREATE TABLE order_address (
   FOREIGN KEY (address_id) REFERENCES user_address(address_id) ON DELETE RESTRICT
 );
 
-CREATE TABLE order_payment (
+-- Order Payments Table
+-- Links orders with their payment transactions and methods
+-- Handles multiple payments for single order (split payments, partial refunds)
+CREATE TABLE order_payments (
   order_payment_id SERIAL PRIMARY KEY,
   order_id INT NOT NULL,
-  payment_id INT NOT NULL,
+  transaction_id INT NOT NULL,
+  payment_method_id INT,                  -- Can be NULL for guest checkout
   amount DECIMAL(10, 2) NOT NULL CHECK (amount >= 0),
+  payment_type VARCHAR(50) NOT NULL       -- FULL, PARTIAL, REFUND
+    CHECK (payment_type IN ('FULL', 'PARTIAL', 'REFUND')),
   payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  status VARCHAR(50) NOT NULL
-    CHECK (status IN ('pending', 'completed', 'failed', 'refunded')),
+  notes TEXT,                            -- Additional payment information
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE,
-  FOREIGN KEY (payment_id) REFERENCES payment_method(payment_id) ON DELETE RESTRICT
+  FOREIGN KEY (transaction_id) REFERENCES payment_transactions(transaction_id) ON DELETE RESTRICT,
+  FOREIGN KEY (payment_method_id) REFERENCES payment_methods(payment_method_id) ON DELETE SET NULL
 );
+
+-- Sample order payments data
+INSERT INTO order_payments (
+  order_id, transaction_id, payment_method_id, amount, payment_type, notes
+) VALUES 
+  (1, 1, 1, 1499.99, 'FULL', 'Full payment via credit card'),
+  (2, 2, 2, 999.50, 'FULL', 'Full payment via UPI'),
+  (3, 3, 3, 1249.50, 'PARTIAL', 'First installment of split payment'),
+  (4, 4, 4, 1299.00, 'FULL', 'Cash on delivery payment');
 
 CREATE TABLE coupon (
   coupon_id SERIAL PRIMARY KEY,
