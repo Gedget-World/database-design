@@ -76,15 +76,6 @@ CREATE TABLE payment_methods (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
 );
-
--- Sample payment methods data
-INSERT INTO payment_methods (user_id, payment_type, is_default, payment_provider, juspay_customer_id, payment_instrument, card_last_digits, card_network, card_brand, card_issuing_bank, card_expiry_month, card_expiry_year) 
-VALUES 
-  (1, 'CREDIT_CARD', true, 'JUSPAY', 'CUST_001', 'VISA', '4242', 'VISA', 'PREMIUM', 'HDFC Bank', '12', '2025'),
-  (1, 'UPI', false, 'JUSPAY', 'CUST_001', 'GOOGLEPAY', NULL, NULL, NULL, NULL, NULL, NULL),
-  (2, 'DEBIT_CARD', true, 'JUSPAY', 'CUST_002', 'MASTERCARD', '8299', 'MASTERCARD', 'PLATINUM', 'ICICI Bank', '08', '2024'),
-  (3, 'COD', true, 'COD', NULL, 'CASH', NULL, NULL, NULL, NULL, NULL, NULL);
-
 -- Payment Transactions Table
 -- Records all payment transactions including both JUSPAY online payments and COD
 -- Maintains complete transaction history with status tracking and refund information
@@ -133,17 +124,6 @@ CREATE TABLE payment_transactions (
   FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE RESTRICT,
   FOREIGN KEY (payment_method_id) REFERENCES payment_methods(payment_method_id) ON DELETE SET NULL
 );
-
--- Sample payment transactions data
-INSERT INTO payment_transactions (
-  order_id, payment_method_id, amount, transaction_status, 
-  juspay_order_reference, juspay_payment_reference, payment_instrument, 
-  response_code, response_message, gateway_transaction_id
-) VALUES 
-  (1, 1, 1499.99, 'CAPTURED', 'ORDER_001', 'PAY_001', 'CREDIT_CARD', 'SUCCESS', 'Transaction successful', 'GTW_001'),
-  (2, 2, 999.50, 'CAPTURED', 'ORDER_002', 'PAY_002', 'UPI', 'SUCCESS', 'UPI transaction completed', 'GTW_002'),
-  (3, 3, 2499.00, 'PENDING', 'ORDER_003', 'PAY_003', 'DEBIT_CARD', 'PENDING', 'Authorization in progress', 'GTW_003'),
-  (4, 4, 1299.00, 'INITIATED', NULL, NULL, 'COD', NULL, 'COD payment initiated', NULL);
 
 -- Add triggers for updated_at
 CREATE TRIGGER update_payment_method_updated_at 
@@ -313,31 +293,6 @@ CREATE TABLE order_payments (
   FOREIGN KEY (payment_method_id) REFERENCES payment_methods(payment_method_id) ON DELETE SET NULL
 );
 
--- Sample order payments data
-INSERT INTO order_payments (
-  order_id, transaction_id, payment_method_id, amount, payment_type, notes
-) VALUES 
-  (1, 1, 1, 1499.99, 'FULL', 'Full payment via credit card'),
-  (2, 2, 2, 999.50, 'FULL', 'Full payment via UPI'),
-  (3, 3, 3, 1249.50, 'PARTIAL', 'First installment of split payment'),
-  (4, 4, 4, 1299.00, 'FULL', 'Cash on delivery payment');
-
-CREATE TABLE coupon (
-  coupon_id SERIAL PRIMARY KEY,
-  code VARCHAR(50) NOT NULL UNIQUE,
-  discount_type VARCHAR(50) NOT NULL
-    CHECK (discount_type IN ('percentage', 'fixed_amount')),
-  discount_value DECIMAL(10, 2) NOT NULL CHECK (discount_value >= 0),
-  start_date TIMESTAMP NOT NULL,
-  end_date TIMESTAMP NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  CHECK (end_date > start_date),
-  CHECK (
-    (discount_type = 'percentage' AND discount_value <= 100) 
-    OR discount_type = 'fixed_amount'
-  )
-);
-
 -- Wishlist Table
 CREATE TABLE wishlist (
   wishlist_id SERIAL PRIMARY KEY,
@@ -383,8 +338,6 @@ CREATE TABLE product_rating (
   FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE,
   UNIQUE(user_id, product_id)
 );
-
--- Additional Tables for Better Functionality
 
 -- Audit trail table
 CREATE TABLE audit_log (
